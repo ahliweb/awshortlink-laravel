@@ -1,0 +1,2500 @@
+openapi: 3.1.0
+info:
+  title: AW Shortlink Management & Service API (Specification v1.1.0-draft)
+  version: 1.1.0-draft
+  summary: Contract-first OpenAPI 3.1 specification for AW Shortlink
+  description: >
+    Authoritative REST contract for AW Shortlink (Workflow Step 8 / SPEC-08).
+    In P0 (DES-015), these contracts back Filament 5 Actions, contract tests,
+    and the contract-driven mock server (`design/mock-server/server.mjs`).
+    External scoped API tokens ship in P1 (#30).
+    Public redirect `GET|HEAD /buka/{slug}`, public landing `/buka/`, and
+    rate-limited misuse report `POST /buka/laporan` are web gateway routes
+    documented in `x-non-api-routes`.
+x-non-api-routes:
+  - path: /buka/{slug}
+    methods: [GET, HEAD]
+    ui: UI-009
+    algorithm: ALG-003
+    description: Stateless public redirect resolver (302 Found / 404 Not Found / 410 Gone / 405 / 503)
+  - path: /buka/
+    methods: [GET]
+    ui: UI-009
+    description: Public institutional landing page and verified public directory
+  - path: /buka/laporan
+    methods: [POST]
+    ui: UI-009
+    description: Rate-limited CSRF-protected public misuse report form (P1 #34)
+servers:
+  - url: https://links.example.org/buka/api/v1
+    description: Production target path (pending HOST-01..17 verification)
+  - url: http://127.0.0.1:4010/buka/api/v1
+    description: Local contract-driven mock server (design/mock-server/server.mjs)
+security:
+  - bearerAuth: []
+tags:
+  - name: Links
+    description: Short link catalog, slug check, and destination version history
+  - name: Workflow
+    description: Submission, destination validation, review queue, approval, and suspension
+  - name: QR
+    description: Deterministic SVG/PNG QR generation
+  - name: Analytics
+    description: Privacy-preserving aggregate click analytics with k=10 cohort suppression
+  - name: Campaigns
+    description: Campaign grouping and CSV bulk operations (P1)
+  - name: Audit
+    description: Hash-chained append-only audit log and chain verification
+  - name: Identity
+    description: Managed users, organizational units, closure hierarchy, and memberships
+  - name: AccessPolicy
+    description: Managed RBAC roles, permission matrix, scoped assignments, ABAC policies, and Effective Access Inspector
+  - name: Workspace
+    description: Authenticated user self-service profile, grants, MFA, and sessions
+  - name: Ops
+    description: System, PostgreSQL RLS, and scheduler health diagnostics
+paths:
+  /links:
+    get:
+      tags: [Links]
+      x-api-id: API-001
+      operationId: listLinks
+      summary: List links scoped to the actor unit
+      x-permission: links.list_internal
+      x-ui-screens: [UI-001, UI-002]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema: { type: string, enum: [draft, submitted, active, suspended, expired, archived] }
+        - name: unitId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: Cursor-paginated links accessible to caller
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Link' }
+                  meta: { $ref: '#/components/schemas/CursorMeta' }
+              example:
+                data:
+                  - id: "0192e5a0-1111-7000-8000-000000000001"
+                    namespace: "buka"
+                    slug: "event62"
+                    title: "Event 62 guide"
+                    destinationHost: "links.example.org"
+                    currentDestinationUrl: "https://links.example.org/informasi/event-62"
+                    riskClass: "low"
+                    unitId: "0192e5a0-0001-7000-8000-000000000001"
+                    status: "active"
+                    version: 2
+                    publishedAt: "2026-10-31T01:00:00Z"
+                    expiresAt: null
+                meta:
+                  nextCursor: null
+                  limit: 25
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Links]
+      x-api-id: API-002
+      operationId: createLink
+      summary: Create draft link and reserve slug; never publishes automatically
+      x-permission: links.create_draft
+      x-ui-screens: [UI-003]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLink' }
+      responses:
+        '201':
+          description: Draft link created
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+              example:
+                id: "0192e5a0-1111-7000-8000-000000000002"
+                namespace: "buka"
+                slug: "skm"
+                title: "Survei Kepuasan Masyarakat @@ORG_SHORT@@"
+                destinationHost: "links.example.org"
+                currentDestinationUrl: null
+                riskClass: "low"
+                unitId: "0192e5a0-0001-7000-8000-000000000001"
+                status: "draft"
+                version: 1
+                publishedAt: null
+                expiresAt: null
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /links/check-slug:
+    post:
+      tags: [Links]
+      x-api-id: API-003
+      operationId: checkSlugAvailability
+      summary: Canonicalize candidate slug (ALG-001) and check reserved_slugs / active links
+      x-permission: links.create_draft
+      x-ui-screens: [UI-003]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug]
+              properties:
+                slug: { type: string, minLength: 1, maxLength: 80 }
+      responses:
+        '200':
+          description: Slug canonicalization and availability result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [canonicalSlug, available, reasonCode]
+                properties:
+                  canonicalSlug: { type: [string, 'null'] }
+                  available: { type: boolean }
+                  reasonCode: { type: string, enum: [AVAILABLE, RESERVED_SYSTEM, RESERVED_PUBLISHED_TOMBSTONE, IN_USE, INVALID_FORMAT] }
+              example:
+                canonicalSlug: "campaign"
+                available: true
+                reasonCode: "AVAILABLE"
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /destinations/validate:
+    post:
+      tags: [Workflow]
+      x-api-id: API-004
+      operationId: validateDestination
+      summary: Server-authoritative URL canonicalization and risk classification (ALG-002, zero network I/O)
+      x-permission: destinations.propose
+      x-ui-screens: [UI-003, UI-007]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, maxLength: 2048 }
+      responses:
+        '200':
+          description: Canonical URL and risk policy verdict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DestinationVerdict' }
+              example:
+                valid: true
+                canonicalUrl: "https://links.example.org/informasi/event-62"
+                canonicalHost: "links.example.org"
+                riskClass: "low"
+                requiresIndependentApproval: false
+                reasonCodes: ["INSTITUTIONAL_ALLOWLIST"]
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /links/{id}:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    get:
+      tags: [Links]
+      x-api-id: API-005
+      operationId: getLink
+      summary: Get scoped link detail
+      x-permission: links.list_internal
+      x-ui-screens: [UI-003, UI-004]
+      responses:
+        '200':
+          description: Scoped link detail with current ETag
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+              example:
+                id: "0192e5a0-1111-7000-8000-000000000001"
+                namespace: "buka"
+                slug: "event62"
+                title: "Event 62 guide"
+                destinationHost: "links.example.org"
+                currentDestinationUrl: "https://links.example.org/informasi/event-62"
+                riskClass: "low"
+                unitId: "0192e5a0-0001-7000-8000-000000000001"
+                status: "active"
+                version: 2
+                publishedAt: "2026-10-31T01:00:00Z"
+                expiresAt: null
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Links]
+      x-api-id: API-006
+      operationId: updateLinkDraft
+      summary: Update link metadata or draft settings with optimistic concurrency
+      x-permission: links.update_draft
+      x-ui-screens: [UI-003]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateLink' }
+      responses:
+        '200':
+          description: Updated link version
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+              example:
+                id: "0192e5a0-1111-7000-8000-000000000001"
+                namespace: "buka"
+                slug: "event62"
+                title: "Event 62 guide (Diperbarui)"
+                destinationHost: "links.example.org"
+                currentDestinationUrl: "https://links.example.org/informasi/event-62"
+                riskClass: "low"
+                unitId: "0192e5a0-0001-7000-8000-000000000001"
+                status: "active"
+                version: 3
+                publishedAt: "2026-10-31T01:00:00Z"
+                expiresAt: null
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
+  /links/{id}/destinations:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    get:
+      tags: [Links]
+      x-api-id: API-007
+      operationId: listLinkDestinations
+      summary: List immutable destination versions for a link
+      x-permission: destinations.view_history
+      x-ui-screens: [UI-004, UI-007]
+      responses:
+        '200':
+          description: Ordered destination revision history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/LinkDestination' }
+              example:
+                data:
+                  - id: "0192e5a0-2222-7000-8000-000000000001"
+                    linkId: "0192e5a0-1111-7000-8000-000000000001"
+                    version: 1
+                    urlCanonical: "https://links.example.org/informasi/event-62"
+                    hostCanonical: "links.example.org"
+                    riskClass: "low"
+                    status: "current"
+                    proposedBy: "0192e5a0-0002-7000-8000-000000000002"
+                    approvedBy: "0192e5a0-0002-7000-8000-000000000003"
+                    createdAt: "2026-10-31T00:30:00Z"
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Links]
+      x-api-id: API-008
+      operationId: proposeDestination
+      summary: Propose a new destination version v(n+1) while keeping current version live
+      x-permission: destinations.propose
+      x-ui-screens: [UI-003, UI-004]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destinationUrl, reason]
+              properties:
+                destinationUrl: { type: string, format: uri, maxLength: 2048 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '201':
+          description: Proposed destination revision recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LinkDestination' }
+              example:
+                id: "0192e5a0-2222-7000-8000-000000000002"
+                linkId: "0192e5a0-1111-7000-8000-000000000001"
+                version: 2
+                urlCanonical: "https://links.example.org/informasi/event-62-buku-panduan"
+                hostCanonical: "links.example.org"
+                riskClass: "low"
+                status: "proposed"
+                proposedBy: "0192e5a0-0002-7000-8000-000000000002"
+                approvedBy: null
+                createdAt: "2026-10-31T02:00:00Z"
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Validation' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
+  /links/{id}/destinations/{versionId}/rollback:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+      - name: versionId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Links]
+      x-api-id: API-009
+      operationId: rollbackLinkDestination
+      summary: Atomically revert current_destination_id to a previously approved destination version
+      x-permission: destinations.rollback
+      x-ui-screens: [UI-004]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Pointer swapped back to approved destination version with new audit entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+              example:
+                id: "0192e5a0-1111-7000-8000-000000000001"
+                namespace: "buka"
+                slug: "event62"
+                title: "Event 62 guide"
+                destinationHost: "links.example.org"
+                currentDestinationUrl: "https://links.example.org/informasi/event-62"
+                riskClass: "low"
+                unitId: "0192e5a0-0001-7000-8000-000000000001"
+                status: "active"
+                version: 4
+                publishedAt: "2026-10-31T01:00:00Z"
+                expiresAt: null
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /links/{id}/submit:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    post:
+      tags: [Workflow]
+      x-api-id: API-010
+      operationId: submitLink
+      summary: Submit draft or proposed destination version for approval
+      x-permission: links.submit
+      x-ui-screens: [UI-003, UI-004]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Submission recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowReceipt' }
+              example:
+                status: "submitted"
+                version: 2
+                auditEventId: 10042
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /links/{id}/approve:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    post:
+      tags: [Workflow]
+      x-api-id: API-011
+      operationId: approveLink
+      summary: Approve submitted destination and publish/swap active pointer (enforces POL-LINK-SOD)
+      x-permission: links.approve
+      x-ui-screens: [UI-004, UI-007]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, reason]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Link approved, slug permanently reserved, and destination pointer updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowReceipt' }
+              example:
+                status: "active"
+                version: 3
+                auditEventId: 10043
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /links/{id}/reject:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    post:
+      tags: [Workflow]
+      x-api-id: API-012
+      operationId: rejectLink
+      summary: Reject submitted draft or proposed destination version with reviewer reason
+      x-permission: links.reject
+      x-ui-screens: [UI-004, UI-007]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Proposal rejected and returned to draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowReceipt' }
+              example:
+                status: "draft"
+                version: 3
+                auditEventId: 10044
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /links/{id}/suspend:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    post:
+      tags: [Workflow]
+      x-api-id: API-013
+      operationId: suspendLink
+      summary: Immediately suspend link on authoritative resolver reads (returns HTTP 404 to public per DES-003)
+      x-permission: links.suspend
+      x-ui-screens: [UI-004, UI-007]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Link suspended immediately
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowReceipt' }
+              example:
+                status: "suspended"
+                version: 4
+                auditEventId: 10045
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /links/{id}/reinstate:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    post:
+      tags: [Workflow]
+      x-api-id: API-014
+      operationId: reinstateLink
+      summary: Reinstate a suspended or expired link after review
+      x-permission: links.reinstate
+      x-ui-screens: [UI-004, UI-007]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+                expiresAt: { type: [string, 'null'], format: date-time }
+      responses:
+        '200':
+          description: Link reinstated to active
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowReceipt' }
+              example:
+                status: "active"
+                version: 5
+                auditEventId: 10046
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /links/{id}/archive:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    post:
+      tags: [Workflow]
+      x-api-id: API-015
+      operationId: archiveLink
+      summary: Permanently archive link (public receives 410 Gone; slug remains permanently reserved)
+      x-permission: links.archive
+      x-ui-screens: [UI-002, UI-004]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+                retiredPublicMessage: { type: boolean, default: true }
+      responses:
+        '200':
+          description: Link archived with permanent slug tombstone
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowReceipt' }
+              example:
+                status: "archived"
+                version: 6
+                auditEventId: 10047
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /reviews/pending:
+    get:
+      tags: [Workflow]
+      x-api-id: API-016
+      operationId: listPendingReviews
+      summary: List pending link/destination approvals in caller scope (P1 #27)
+      x-permission: links.approve
+      x-ui-screens: [UI-001, UI-007]
+      responses:
+        '200':
+          description: Scoped pending review items with SoD flags
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [linkId, slug, unitId, proposedUrl, riskClass, authoredBy, selfApprovalBlocked]
+                      properties:
+                        linkId: { type: string, format: uuid }
+                        slug: { type: string }
+                        unitId: { type: string, format: uuid }
+                        proposedUrl: { type: string, format: uri }
+                        riskClass: { type: string, enum: [low, medium, high] }
+                        authoredBy: { type: string, format: uuid }
+                        selfApprovalBlocked: { type: boolean }
+              example:
+                data:
+                  - linkId: "0192e5a0-1111-7000-8000-000000000009"
+                    slug: "materi-pelatihan"
+                    unitId: "0192e5a0-0001-7000-8000-000000000001"
+                    proposedUrl: "https://pelatihan.portal.example.go.id/modul-2026"
+                    riskClass: "medium"
+                    authoredBy: "0192e5a0-0002-7000-8000-000000000002"
+                    selfApprovalBlocked: false
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /links/{id}/qr:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    get:
+      tags: [QR]
+      x-api-id: API-017
+      operationId: downloadLinkQr
+      summary: Generate deterministic SVG/PNG QR encoding only the canonical /buka/{slug} URL
+      x-permission: qr.generate_public
+      x-ui-screens: [UI-004, UI-005]
+      parameters:
+        - name: format
+          in: query
+          schema: { type: string, enum: [svg, png], default: svg }
+        - name: size
+          in: query
+          schema: { type: integer, enum: [256, 512, 1024], default: 512 }
+      responses:
+        '200':
+          description: Safe machine-readable QR image of canonical short URL
+          content:
+            image/svg+xml:
+              schema: { type: string }
+              example: "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\"><title>QR /buka/event62</title></svg>"
+            image/png:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /analytics/overview:
+    get:
+      tags: [Analytics]
+      x-api-id: API-018
+      operationId: getAnalyticsOverview
+      summary: Unit/date aggregate click overview with k=10 small-cohort suppression (DES-005)
+      x-permission: analytics.view
+      x-ui-screens: [UI-001, UI-006]
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: unitId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Aggregate overview with suppression metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsOverview' }
+              example:
+                validClicks: 1420
+                suspectedBots: 185
+                totalRequests: 1605
+                cohortSuppressionThreshold: 10
+                dataGapCount: 0
+                asOf: "2026-10-31T08:00:00Z"
+                dailySeries:
+                  - dateUtc: "2026-10-30"
+                    validClicksDisplay: "710"
+                    suspectedBotsDisplay: "90"
+                    suppressed: false
+                  - dateUtc: "2026-10-31"
+                    validClicksDisplay: "<10"
+                    suspectedBotsDisplay: "0"
+                    suppressed: true
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /links/{id}/analytics:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    get:
+      tags: [Analytics]
+      x-api-id: API-019
+      operationId: getLinkAnalytics
+      summary: Aggregate-only metrics for a single link (DES-004 editor own-link scope, DES-005 k=10 suppression)
+      x-permission: analytics.view
+      x-ui-screens: [UI-004, UI-006]
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Aggregate-only link metrics with freshness timestamp
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsOverview' }
+              example:
+                validClicks: 340
+                suspectedBots: 42
+                totalRequests: 382
+                cohortSuppressionThreshold: 10
+                dataGapCount: 0
+                asOf: "2026-10-31T08:00:00Z"
+                dailySeries:
+                  - dateUtc: "2026-10-31"
+                    validClicksDisplay: "340"
+                    suspectedBotsDisplay: "42"
+                    suppressed: false
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /analytics/export:
+    post:
+      tags: [Analytics]
+      x-api-id: API-020
+      operationId: exportAnalyticsAggregate
+      summary: Export CSV-injection-safe aggregate analytics report (P1 #33)
+      x-permission: analytics.export
+      x-ui-screens: [UI-006]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from, to]
+              properties:
+                from: { type: string, format: date }
+                to: { type: string, format: date }
+                unitId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Sanitized aggregate CSV stream
+          content:
+            text/csv:
+              schema: { type: string }
+              example: "date_utc,slug,valid_clicks,suspected_bots\n2026-10-31,event62,340,42\n"
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /campaigns:
+    get:
+      tags: [Campaigns]
+      x-api-id: API-021
+      operationId: listCampaigns
+      summary: List unit-scoped campaigns (P1 #28)
+      x-permission: campaigns.read
+      x-ui-screens: [UI-003, UI-006]
+      responses:
+        '200':
+          description: Scope-filtered campaigns
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Campaign' }
+              example:
+                data:
+                  - id: "0192e5a0-3333-7000-8000-000000000001"
+                    unitId: "0192e5a0-0001-7000-8000-000000000001"
+                    code: "EVENT62"
+                    name: "Kampanye National event 62"
+                    status: "running"
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Campaigns]
+      x-api-id: API-022
+      operationId: createCampaign
+      summary: Create a campaign within unit scope (P1 #28)
+      x-permission: campaigns.create
+      x-ui-screens: [UI-006]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [unitId, code, name]
+              properties:
+                unitId: { type: string, format: uuid }
+                code: { type: string, minLength: 2, maxLength: 32 }
+                name: { type: string, minLength: 3, maxLength: 160 }
+      responses:
+        '201':
+          description: Campaign created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+              example:
+                id: "0192e5a0-3333-7000-8000-000000000002"
+                unitId: "0192e5a0-0001-7000-8000-000000000001"
+                code: "CAMP2026"
+                name: "Awareness campaign"
+                status: "planned"
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /audit/events:
+    get:
+      tags: [Audit]
+      x-api-id: API-023
+      operationId: listAuditEvents
+      summary: List append-only hash-chained audit events within caller scope
+      x-permission: audit.view
+      x-ui-screens: [UI-001, UI-004]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: linkId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: actorId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Scoped append-only audit trail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEvent' }
+                  meta: { $ref: '#/components/schemas/CursorMeta' }
+              example:
+                data:
+                  - id: 10043
+                    unitId: "0192e5a0-0001-7000-8000-000000000001"
+                    linkId: "0192e5a0-1111-7000-8000-000000000001"
+                    actorId: "0192e5a0-0002-7000-8000-000000000003"
+                    action: "links.approve"
+                    subjectType: "link"
+                    subjectVersion: 2
+                    reason: "Domain resmi links.example.org terverifikasi"
+                    occurredAt: "2026-10-31T01:00:00Z"
+                    prevHash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+                    rowHash: "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+                meta:
+                  nextCursor: null
+                  limit: 25
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /audit/verify-chain:
+    post:
+      tags: [Audit]
+      x-api-id: API-024
+      operationId: verifyAuditChain
+      summary: Recompute and verify SHA-256 hash chain integrity of link_audit_events
+      x-permission: audit.verify_chain
+      x-ui-screens: [UI-010]
+      responses:
+        '200':
+          description: Hash-chain verification report
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [intact, checkedRows, headId, headHash, verifiedAt]
+                properties:
+                  intact: { type: boolean }
+                  checkedRows: { type: integer }
+                  headId: { type: integer }
+                  headHash: { type: string }
+                  verifiedAt: { type: string, format: date-time }
+              example:
+                intact: true
+                checkedRows: 43
+                headId: 10043
+                headHash: "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+                verifiedAt: "2026-10-31T08:05:00Z"
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /access/units:
+    get:
+      tags: [Identity]
+      x-api-id: API-025
+      operationId: listUnits
+      summary: List organizational units and closure hierarchy depths within caller scope
+      x-permission: units.read
+      x-ui-screens: [UI-001, UI-002, UI-003, UI-011, UI-015, UI-017]
+      responses:
+        '200':
+          description: Scoped organizational units
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Unit' }
+              example:
+                data:
+                  - id: "0192e5a0-0001-7000-8000-000000000001"
+                    parentId: null
+                    code: "ROOT"
+                    name: "@@ORG_NAME@@"
+                    status: "active"
+                    depth: 0
+                    version: 1
+                  - id: "0192e5a0-0001-7000-8000-000000000002"
+                    parentId: "0192e5a0-0001-7000-8000-000000000001"
+                    code: "BRANCH_A"
+                    name: "Branch A"
+                    status: "active"
+                    depth: 1
+                    version: 1
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Identity]
+      x-api-id: API-026
+      operationId: createUnit
+      summary: Create an organizational unit and update unit_closure transactionally
+      x-permission: units.create
+      x-ui-screens: [UI-017]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                parentId: { type: [string, 'null'], format: uuid }
+                code: { type: string, pattern: '^[A-Z0-9_]{2,32}$' }
+                name: { type: string, minLength: 2, maxLength: 160 }
+      responses:
+        '201':
+          description: Unit created and closure rows inserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Unit' }
+              example:
+                id: "0192e5a0-0001-7000-8000-000000000003"
+                parentId: "0192e5a0-0001-7000-8000-000000000001"
+                code: "BRANCH_B"
+                name: "Branch B"
+                status: "active"
+                depth: 1
+                version: 1
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/units/{unitId}/move:
+    parameters:
+      - name: unitId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Identity]
+      x-api-id: API-027
+      operationId: moveUnit
+      summary: Reparent an organizational unit and rebuild affected unit_closure rows
+      x-permission: units.move
+      x-ui-screens: [UI-017]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newParentId, reason]
+              properties:
+                newParentId: { type: string, format: uuid }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Unit hierarchy updated and audited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Unit' }
+              example:
+                id: "0192e5a0-0001-7000-8000-000000000003"
+                parentId: "0192e5a0-0001-7000-8000-000000000001"
+                code: "BRANCH_B"
+                name: "Branch B"
+                status: "active"
+                depth: 1
+                version: 2
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/units/{unitId}/memberships:
+    parameters:
+      - name: unitId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Identity]
+      x-api-id: API-028
+      operationId: listUnitMemberships
+      summary: List user memberships in an organizational unit
+      x-permission: units.read
+      x-ui-screens: [UI-017]
+      responses:
+        '200':
+          description: Active and historical unit memberships
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/UnitMembership' }
+              example:
+                data:
+                  - id: "0192e5a0-4444-7000-8000-000000000001"
+                    userId: "0192e5a0-0002-7000-8000-000000000002"
+                    unitId: "0192e5a0-0001-7000-8000-000000000002"
+                    status: "active"
+                    validFrom: "2026-01-01T00:00:00Z"
+                    validUntil: null
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Identity]
+      x-api-id: API-029
+      operationId: addMembership
+      summary: Add a user to an organizational unit (cannot self-add per CHECK created_by <> user_id)
+      x-permission: units.memberships.manage
+      x-ui-screens: [UI-011, UI-017]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, reason]
+              properties:
+                userId: { type: string, format: uuid }
+                validUntil: { type: [string, 'null'], format: date-time }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '201':
+          description: Unit membership created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnitMembership' }
+              example:
+                id: "0192e5a0-4444-7000-8000-000000000002"
+                userId: "0192e5a0-0002-7000-8000-000000000004"
+                unitId: "0192e5a0-0001-7000-8000-000000000002"
+                status: "active"
+                validFrom: "2026-10-31T08:00:00Z"
+                validUntil: null
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /access/units/{unitId}/memberships/{membershipId}/revoke:
+    parameters:
+      - name: unitId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: membershipId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Identity]
+      x-api-id: API-030
+      operationId: revokeMembership
+      summary: Revoke a user's unit membership and invalidate dependent unit-scoped sessions
+      x-permission: units.memberships.manage
+      x-ui-screens: [UI-011, UI-017]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Membership revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnitMembership' }
+              example:
+                id: "0192e5a0-4444-7000-8000-000000000002"
+                userId: "0192e5a0-0002-7000-8000-000000000004"
+                unitId: "0192e5a0-0001-7000-8000-000000000002"
+                status: "revoked"
+                validFrom: "2026-10-31T08:00:00Z"
+                validUntil: "2026-10-31T09:00:00Z"
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /access/users:
+    get:
+      tags: [Identity]
+      x-api-id: API-031
+      operationId: listManagedUsers
+      summary: List users within authorized unit scopes only (secrets excluded)
+      x-permission: users.read
+      x-ui-screens: [UI-011, UI-015, UI-016]
+      responses:
+        '200':
+          description: Scoped user summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ManagedUser' }
+              example:
+                data:
+                  - id: "0192e5a0-0002-7000-8000-000000000002"
+                    name: "Rina Wulandari"
+                    email: "rina.promkes@example.org"
+                    status: "active"
+                    mfaEnrolled: true
+                    isProtectedOwner: false
+                    version: 1
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Identity]
+      x-api-id: API-032
+      operationId: inviteUser
+      summary: Invite a user and assign initial unit membership within delegation ceiling
+      x-permission: users.invite
+      x-ui-screens: [UI-011]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, unitId]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+                email: { type: string, format: email }
+                unitId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Invitation recorded without exposing plaintext password or token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedUser' }
+              example:
+                id: "0192e5a0-0002-7000-8000-000000000009"
+                name: "Budi Santoso"
+                email: "budi.pkm@example.org"
+                status: "invited"
+                mfaEnrolled: false
+                isProtectedOwner: false
+                version: 1
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /access/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Identity]
+      x-api-id: API-033
+      operationId: getManagedUser
+      summary: Get scoped user account detail, memberships, and active role grants
+      x-permission: users.read
+      x-ui-screens: [UI-011, UI-015]
+      responses:
+        '200':
+          description: Scoped user detail
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedUser' }
+              example:
+                id: "0192e5a0-0002-7000-8000-000000000002"
+                name: "Rina Wulandari"
+                email: "rina.promkes@example.org"
+                status: "active"
+                mfaEnrolled: true
+                isProtectedOwner: false
+                version: 1
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Identity]
+      x-api-id: API-034
+      operationId: updateManagedUser
+      summary: Update staff profile fields (PII-001/PII-002 correction path)
+      x-permission: users.update
+      x-ui-screens: [UI-011, UI-018]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+      responses:
+        '200':
+          description: User profile updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedUser' }
+              example:
+                id: "0192e5a0-0002-7000-8000-000000000002"
+                name: "Rina Wulandari, S.KM"
+                email: "rina.promkes@example.org"
+                status: "active"
+                mfaEnrolled: true
+                isProtectedOwner: false
+                version: 2
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/users/{id}/suspend:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Identity]
+      x-api-id: API-035
+      operationId: suspendUser
+      summary: Suspend user account and immediately revoke all active sessions and tokens
+      x-permission: users.suspend
+      x-ui-screens: [UI-011]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: User suspended and sessions terminated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedUser' }
+              example:
+                id: "0192e5a0-0002-7000-8000-000000000002"
+                name: "Rina Wulandari"
+                email: "rina.promkes@example.org"
+                status: "suspended"
+                mfaEnrolled: true
+                isProtectedOwner: false
+                version: 3
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/users/{id}/reinstate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Identity]
+      x-api-id: API-036
+      operationId: reinstateUser
+      summary: Reinstate a suspended user account with audited reason
+      x-permission: users.suspend
+      x-ui-screens: [UI-011]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: User reinstated to active
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedUser' }
+              example:
+                id: "0192e5a0-0002-7000-8000-000000000002"
+                name: "Rina Wulandari"
+                email: "rina.promkes@example.org"
+                status: "active"
+                mfaEnrolled: true
+                isProtectedOwner: false
+                version: 4
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/users/{id}/disable:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Identity]
+      x-api-id: API-037
+      operationId: disableUser
+      summary: Terminal offboarding of user account (blocks disabling last active platform_owner per THR-020)
+      x-permission: users.disable
+      x-ui-screens: [UI-011]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Account disabled, credentials wiped, sessions and grants revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedUser' }
+              example:
+                id: "0192e5a0-0002-7000-8000-000000000002"
+                name: "Rina Wulandari"
+                email: "rina.promkes@example.org"
+                status: "disabled"
+                mfaEnrolled: false
+                isProtectedOwner: false
+                version: 5
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/users/{id}/revoke-sessions:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Identity]
+      x-api-id: API-038
+      operationId: revokeUserSessions
+      summary: Immediately invalidate all active web sessions and API tokens for a user
+      x-permission: users.revoke_sessions
+      x-ui-screens: [UI-011]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Sessions revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revokedSessions, auditEventId]
+                properties:
+                  revokedSessions: { type: integer }
+                  auditEventId: { type: integer }
+              example:
+                revokedSessions: 2
+                auditEventId: 10048
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /access/users/{id}/roles:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [AccessPolicy]
+      x-api-id: API-039
+      operationId: listUserRoleAssignments
+      summary: List active and historical scoped role assignments for a user
+      x-permission: roles.read
+      x-ui-screens: [UI-011, UI-015]
+      responses:
+        '200':
+          description: User role assignments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/RoleAssignment' }
+              example:
+                data:
+                  - id: "0192e5a0-5555-7000-8000-000000000001"
+                    userId: "0192e5a0-0002-7000-8000-000000000002"
+                    roleKey: "editor"
+                    scopeType: "unit"
+                    unitId: "0192e5a0-0001-7000-8000-000000000002"
+                    validFrom: "2026-01-01T00:00:00Z"
+                    validUntil: "2026-12-31T23:59:59Z"
+                    status: "active"
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [AccessPolicy]
+      x-api-id: API-040
+      operationId: assignUserRole
+      summary: Grant a scoped, time-bound role within grantor delegation ceiling (creates change request if sensitive)
+      x-permission: user_roles.assign
+      x-ui-screens: [UI-015]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roleId, scopeType, expectedVersion, reason]
+              properties:
+                roleId: { type: string, format: uuid }
+                unitId: { type: [string, 'null'], format: uuid }
+                scopeType: { type: string, enum: [global, unit, unit_descendants, owned] }
+                validUntil: { type: [string, 'null'], format: date-time }
+                expectedVersion: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Role assignment active or queued as pending access_change_request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleAssignment' }
+              example:
+                id: "0192e5a0-5555-7000-8000-000000000002"
+                userId: "0192e5a0-0002-7000-8000-000000000002"
+                roleKey: "editor"
+                scopeType: "unit"
+                unitId: "0192e5a0-0001-7000-8000-000000000002"
+                validFrom: "2026-10-31T08:00:00Z"
+                validUntil: "2026-12-31T23:59:59Z"
+                status: "active"
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/users/{id}/roles/{assignmentId}/revoke:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: assignmentId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [AccessPolicy]
+      x-api-id: API-041
+      operationId: revokeUserRole
+      summary: Revoke an active role assignment and audit reason
+      x-permission: user_roles.revoke
+      x-ui-screens: [UI-015]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Role assignment revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleAssignment' }
+              example:
+                id: "0192e5a0-5555-7000-8000-000000000002"
+                userId: "0192e5a0-0002-7000-8000-000000000002"
+                roleKey: "editor"
+                scopeType: "unit"
+                unitId: "0192e5a0-0001-7000-8000-000000000002"
+                validFrom: "2026-10-31T08:00:00Z"
+                validUntil: "2026-10-31T09:00:00Z"
+                status: "revoked"
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /access/change-requests:
+    get:
+      tags: [AccessPolicy]
+      x-api-id: API-042
+      operationId: listAccessChangeRequests
+      summary: List pending and decided dual-control access change requests
+      x-permission: user_roles.approve_request
+      x-ui-screens: [UI-015]
+      responses:
+        '200':
+          description: Dual-control access change requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/AccessChangeRequest' }
+              example:
+                data:
+                  - id: "0192e5a0-6666-7000-8000-000000000001"
+                    requestedBy: "0192e5a0-0002-7000-8000-000000000005"
+                    targetUserId: "0192e5a0-0002-7000-8000-000000000006"
+                    roleKey: "approver"
+                    scopeType: "unit"
+                    unitId: "0192e5a0-0001-7000-8000-000000000002"
+                    status: "pending"
+                    reason: "Penunjukan approver baru Branch A"
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /access/change-requests/{requestId}/decide:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [AccessPolicy]
+      x-api-id: API-043
+      operationId: decideAccessChangeRequest
+      summary: Independently approve or deny a sensitive role grant request (approver <> requester, MFA required)
+      x-permission: user_roles.approve_request
+      x-ui-screens: [UI-015]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision: { type: string, enum: [approve, deny] }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Access change request decided and audited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessChangeRequest' }
+              example:
+                id: "0192e5a0-6666-7000-8000-000000000001"
+                requestedBy: "0192e5a0-0002-7000-8000-000000000005"
+                targetUserId: "0192e5a0-0002-7000-8000-000000000006"
+                roleKey: "approver"
+                scopeType: "unit"
+                unitId: "0192e5a0-0001-7000-8000-000000000002"
+                status: "approved"
+                reason: "Disetujui setelah verifikasi SK penugasan"
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/roles:
+    get:
+      tags: [AccessPolicy]
+      x-api-id: API-044
+      operationId: listManagedRoles
+      summary: List protected system roles and custom roles
+      x-permission: roles.read
+      x-ui-screens: [UI-012, UI-013, UI-015]
+      responses:
+        '200':
+          description: Role summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ManagedRole' }
+              example:
+                data:
+                  - id: "0192e5a0-7777-7000-8000-000000000001"
+                    key: "platform_owner"
+                    label: "Pemilik Platform (Protected)"
+                    isProtected: true
+                    sensitivity: "protected"
+                    status: "active"
+                    version: 1
+                  - id: "0192e5a0-7777-7000-8000-000000000004"
+                    key: "editor"
+                    label: "Editor Program / Unit"
+                    isProtected: true
+                    sensitivity: "normal"
+                    status: "active"
+                    version: 1
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [AccessPolicy]
+      x-api-id: API-045
+      operationId: createManagedRole
+      summary: Create a custom role with immutable key
+      x-permission: roles.create
+      x-ui-screens: [UI-012]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, label]
+              properties:
+                key: { type: string, pattern: '^[a-z][a-z0-9_]{2,48}$' }
+                label: { type: string, minLength: 3, maxLength: 100 }
+                sensitivity: { type: string, enum: [normal, sensitive], default: normal }
+      responses:
+        '201':
+          description: Custom role created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedRole' }
+              example:
+                id: "0192e5a0-7777-7000-8000-000000000009"
+                key: "koordinator_kampanye"
+                label: "Koordinator Kampanye Kesehatan"
+                isProtected: false
+                sensitivity: "normal"
+                status: "active"
+                version: 1
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/permissions:
+    get:
+      tags: [AccessPolicy]
+      x-api-id: API-046
+      operationId: listPermissionCatalog
+      summary: List source-controlled PERM-001..062 permission catalog
+      x-permission: permissions.read
+      x-ui-screens: [UI-013]
+      responses:
+        '200':
+          description: Source-controlled permission definitions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [catalogVersion, data]
+                properties:
+                  catalogVersion: { type: integer }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, key, description, risk]
+                      properties:
+                        id: { type: string }
+                        key: { type: string }
+                        description: { type: string }
+                        risk: { type: string, enum: [low, medium, high, critical] }
+              example:
+                catalogVersion: 1
+                data:
+                  - id: "PERM-001"
+                    key: "links.read_public"
+                    description: "Resolve published public short links"
+                    risk: "low"
+                  - id: "PERM-006"
+                    key: "links.approve"
+                    description: "Approve and publish short link destinations within scope"
+                    risk: "high"
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /access/roles/{id}/permissions:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      tags: [AccessPolicy]
+      x-api-id: API-047
+      operationId: replaceRolePermissions
+      summary: Replace role permissions within caller's delegated privilege ceiling (protected roles locked)
+      x-permission: roles.permissions.update
+      x-ui-screens: [UI-013]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [permissionKeys, expectedVersion, reason]
+              properties:
+                permissionKeys:
+                  type: array
+                  uniqueItems: true
+                  items: { type: string }
+                expectedVersion: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Role permissions updated and audited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedRole' }
+              example:
+                id: "0192e5a0-7777-7000-8000-000000000009"
+                key: "koordinator_kampanye"
+                label: "Koordinator Kampanye Kesehatan"
+                isProtected: false
+                sensitivity: "normal"
+                status: "active"
+                version: 2
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/policies:
+    get:
+      tags: [AccessPolicy]
+      x-api-id: API-048
+      operationId: listAbacPolicies
+      summary: List ABAC policy definitions and their active/draft versions
+      x-permission: policies.read
+      x-ui-screens: [UI-014]
+      responses:
+        '200':
+          description: ABAC policy definitions and versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/AbacPolicy' }
+              example:
+                data:
+                  - id: "0192e5a0-8888-7000-8000-000000000001"
+                    key: "POL-LINK-SOD"
+                    resource: "links"
+                    action: "links.approve"
+                    activeVersion: 3
+                    status: "active"
+                    checksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [AccessPolicy]
+      x-api-id: API-049
+      operationId: createAbacPolicyDraft
+      summary: Author a constrained declarative JSONB ABAC draft (validated against JSON Schema, no code execution)
+      x-permission: policies.create
+      x-ui-screens: [UI-014]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, resource, action, rule]
+              properties:
+                key: { type: string, pattern: '^POL-[A-Z0-9-]+$' }
+                resource: { type: string }
+                action: { type: string }
+                rule: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: ABAC draft version created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AbacPolicy' }
+              example:
+                id: "0192e5a0-8888-7000-8000-000000000002"
+                key: "POL-LINK-SOD"
+                resource: "links"
+                action: "links.approve"
+                activeVersion: 3
+                status: "draft"
+                checksum: "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /access/policies/{id}/simulate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [AccessPolicy]
+      x-api-id: API-050
+      operationId: simulateAbacPolicy
+      summary: Dry-run ABAC policy version against test vectors and sampled grants without mutating state
+      x-permission: policies.simulate
+      x-ui-screens: [UI-014]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorId, resourceType, resourceId, action]
+              properties:
+                actorId: { type: string, format: uuid }
+                resourceType: { type: string }
+                resourceId: { type: string }
+                action: { type: string }
+      responses:
+        '200':
+          description: Simulated verdict with diff summary and redacted reason codes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [allowed, policyVersion, reasonCodes, privilegeExpansionCount]
+                properties:
+                  allowed: { type: boolean }
+                  policyVersion: { type: string }
+                  reasonCodes:
+                    type: array
+                    items: { type: string }
+                  privilegeExpansionCount: { type: integer }
+              example:
+                allowed: false
+                policyVersion: "POL-LINK-SOD@v4-draft"
+                reasonCodes: ["SELF_APPROVAL_FORBIDDEN"]
+                privilegeExpansionCount: 0
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /access/policies/{id}/submit:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [AccessPolicy]
+      x-api-id: API-051
+      operationId: submitAbacPolicyVersion
+      summary: Freeze simulated ABAC draft checksum and submit for independent review
+      x-permission: policies.submit
+      x-ui-screens: [UI-014]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Policy version submitted for independent approval
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AbacPolicy' }
+              example:
+                id: "0192e5a0-8888-7000-8000-000000000002"
+                key: "POL-LINK-SOD"
+                resource: "links"
+                action: "links.approve"
+                activeVersion: 3
+                status: "submitted"
+                checksum: "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/policies/{id}/publish:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [AccessPolicy]
+      x-api-id: API-052
+      operationId: publishAbacPolicyVersion
+      summary: Independently approve and activate submitted ABAC policy version (approver <> author, MFA required)
+      x-permission: policies.publish
+      x-ui-screens: [UI-014]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, expectedChecksum, reason]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                expectedChecksum: { type: string }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Policy version activated and audited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AbacPolicy' }
+              example:
+                id: "0192e5a0-8888-7000-8000-000000000002"
+                key: "POL-LINK-SOD"
+                resource: "links"
+                action: "links.approve"
+                activeVersion: 4
+                status: "active"
+                checksum: "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/policies/{id}/rollback:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [AccessPolicy]
+      x-api-id: API-053
+      operationId: rollbackAbacPolicy
+      summary: Re-activate a previously approved ABAC policy version with new audit entry
+      x-permission: policies.rollback
+      x-ui-screens: [UI-014]
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetVersion, reason]
+              properties:
+                targetVersion: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: Rolled back to target approved version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AbacPolicy' }
+              example:
+                id: "0192e5a0-8888-7000-8000-000000000001"
+                key: "POL-LINK-SOD"
+                resource: "links"
+                action: "links.approve"
+                activeVersion: 3
+                status: "active"
+                checksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /access/effective-permissions:
+    get:
+      tags: [AccessPolicy]
+      x-api-id: API-054
+      operationId: inspectEffectivePermissions
+      summary: Explain allow/deny across Account, RBAC, ABAC, Policy, and RLS layers with redacted output
+      x-permission: access.inspect
+      x-ui-screens: [UI-016]
+      parameters:
+        - name: actorId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: permission
+          in: query
+          required: true
+          schema: { type: string }
+        - name: resourceType
+          in: query
+          required: true
+          schema: { type: string }
+        - name: resourceId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Redacted step-by-step effective access trace
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verdict, permission, steps, evaluatedAt]
+                properties:
+                  verdict: { type: string, enum: [allow, deny] }
+                  permission: { type: string }
+                  steps:
+                    type: array
+                    items:
+                      type: object
+                      required: [layer, result]
+                      properties:
+                        layer: { type: string, enum: [account, rbac, abac, policy, rls] }
+                        result: { type: string, enum: [pass, deny, skipped] }
+                        reasonCode: { type: string }
+                  evaluatedAt: { type: string, format: date-time }
+              example:
+                verdict: "deny"
+                permission: "links.approve"
+                steps:
+                  - { layer: "account", result: "pass" }
+                  - { layer: "rbac", result: "pass", reasonCode: "GRANT_APPROVER_UNIT" }
+                  - { layer: "abac", result: "deny", reasonCode: "SELF_APPROVAL_FORBIDDEN" }
+                  - { layer: "policy", result: "skipped" }
+                  - { layer: "rls", result: "pass" }
+                evaluatedAt: "2026-10-31T09:00:00Z"
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /access/me:
+    get:
+      tags: [Workspace]
+      x-api-id: API-055
+      operationId: getMe
+      summary: Get authenticated staff user's own profile, MFA status, and effective unit scopes
+      x-permission: workspace.self.manage
+      x-ui-screens: [UI-008, UI-018]
+      responses:
+        '200':
+          description: Authenticated staff workspace summary
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, activeGrants, activeSessionsCount]
+                properties:
+                  user: { $ref: '#/components/schemas/ManagedUser' }
+                  activeGrants:
+                    type: array
+                    items: { $ref: '#/components/schemas/RoleAssignment' }
+                  activeSessionsCount: { type: integer }
+              example:
+                user:
+                  id: "0192e5a0-0002-7000-8000-000000000002"
+                  name: "Rina Wulandari"
+                  email: "rina.promkes@example.org"
+                  status: "active"
+                  mfaEnrolled: true
+                  isProtectedOwner: false
+                  version: 1
+                activeGrants:
+                  - id: "0192e5a0-5555-7000-8000-000000000001"
+                    userId: "0192e5a0-0002-7000-8000-000000000002"
+                    roleKey: "editor"
+                    scopeType: "unit"
+                    unitId: "0192e5a0-0001-7000-8000-000000000002"
+                    validFrom: "2026-01-01T00:00:00Z"
+                    validUntil: "2026-12-31T23:59:59Z"
+                    status: "active"
+                activeSessionsCount: 1
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /access/me/sessions:
+    get:
+      tags: [Workspace]
+      x-api-id: API-056
+      operationId: listMySessions
+      summary: List caller's own active sessions (no raw IP exposed per DPIA-006)
+      x-permission: workspace.self.manage
+      x-ui-screens: [UI-008, UI-018]
+      responses:
+        '200':
+          description: Caller's active sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [sessionId, current, lastActivityAt, expiresAt]
+                      properties:
+                        sessionId: { type: string }
+                        current: { type: boolean }
+                        lastActivityAt: { type: string, format: date-time }
+                        expiresAt: { type: string, format: date-time }
+              example:
+                data:
+                  - sessionId: "sess_0192e5a0"
+                    current: true
+                    lastActivityAt: "2026-10-31T08:30:00Z"
+                    expiresAt: "2026-10-31T16:00:00Z"
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /access/me/sessions/{sessionId}/revoke:
+    parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Workspace]
+      x-api-id: API-057
+      operationId: revokeMySession
+      summary: Revoke one of caller's own sessions
+      x-permission: workspace.self.manage
+      x-ui-screens: [UI-008, UI-018]
+      responses:
+        '200':
+          description: Session terminated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: boolean }
+              example:
+                revoked: true
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /ops/health:
+    get:
+      tags: [Ops]
+      x-api-id: API-058
+      operationId: getSystemHealth
+      summary: Admin-only diagnostics for release version, PostgreSQL RLS introspection, scheduler heartbeat, and audit head (no secrets)
+      x-permission: ops.health.view
+      x-ui-screens: [UI-010]
+      responses:
+        '200':
+          description: Sanitized operational health report
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [appVersion, phpVersion, postgresVersion, rlsVerified, runtimeRoleSafe, auditChainIntact, schedulerHeartbeatAt]
+                properties:
+                  appVersion: { type: string }
+                  phpVersion: { type: string }
+                  postgresVersion: { type: string }
+                  rlsVerified: { type: boolean }
+                  runtimeRoleSafe: { type: boolean }
+                  auditChainIntact: { type: boolean }
+                  schedulerHeartbeatAt: { type: [string, 'null'], format: date-time }
+              example:
+                appVersion: "0.1.0-dev"
+                phpVersion: "8.3.13"
+                postgresVersion: "17.2"
+                rlsVerified: true
+                runtimeRoleSafe: true
+                auditChainIntact: true
+                schedulerHeartbeatAt: "2026-10-31T08:59:00Z"
+        '403': { $ref: '#/components/responses/Forbidden' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Session-bound internal CSRF/auth context in P0 (DES-015) or SHA-256 hashed scoped API credential in P1 (#30).
+  headers:
+    ETag:
+      description: Optimistic concurrency version tag (`"v{version}"`)
+      schema: { type: string, example: "\"v2\"" }
+  parameters:
+    LinkId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Expected aggregate version tag (`"v{version}"`); mismatch returns 409 Conflict, omission returns 428
+      schema: { type: string, example: "\"v1\"" }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Client-generated UUID for safe 24h idempotent retries on POST mutations
+      schema: { type: string, format: uuid }
+  schemas:
+    Link:
+      type: object
+      required: [id, namespace, slug, title, unitId, status, version]
+      properties:
+        id: { type: string, format: uuid }
+        namespace: { type: string, default: "buka" }
+        slug: { type: string, pattern: '^[a-z0-9](?:[a-z0-9-]{1,62}[a-z0-9])$' }
+        title: { type: string, minLength: 3, maxLength: 160 }
+        destinationHost: { type: [string, 'null'] }
+        currentDestinationUrl: { type: [string, 'null'], format: uri }
+        riskClass: { type: [string, 'null'], enum: [low, medium, high, null] }
+        unitId: { type: string, format: uuid }
+        status: { type: string, enum: [draft, submitted, active, suspended, expired, archived] }
+        version: { type: integer, minimum: 1 }
+        publishedAt: { type: [string, 'null'], format: date-time }
+        expiresAt: { type: [string, 'null'], format: date-time }
+    CreateLink:
+      type: object
+      required: [slug, title, destinationUrl, unitId]
+      properties:
+        slug: { type: string, minLength: 3, maxLength: 64 }
+        title: { type: string, minLength: 3, maxLength: 160 }
+        destinationUrl: { type: string, format: uri, maxLength: 2048 }
+        unitId: { type: string, format: uuid }
+        campaignId: { type: [string, 'null'], format: uuid }
+        expiresAt: { type: [string, 'null'], format: date-time }
+    UpdateLink:
+      type: object
+      properties:
+        title: { type: string, minLength: 3, maxLength: 160 }
+        campaignId: { type: [string, 'null'], format: uuid }
+        expiresAt: { type: [string, 'null'], format: date-time }
+    LinkDestination:
+      type: object
+      required: [id, linkId, version, urlCanonical, hostCanonical, riskClass, status, proposedBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        linkId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        urlCanonical: { type: string, format: uri }
+        hostCanonical: { type: string }
+        riskClass: { type: string, enum: [low, medium, high, forbidden] }
+        status: { type: string, enum: [proposed, blocked, pending_review, approved, rejected, current, superseded] }
+        proposedBy: { type: string, format: uuid }
+        approvedBy: { type: [string, 'null'], format: uuid }
+        createdAt: { type: string, format: date-time }
+    DestinationVerdict:
+      type: object
+      required: [valid, canonicalUrl, canonicalHost, riskClass, requiresIndependentApproval, reasonCodes]
+      properties:
+        valid: { type: boolean }
+        canonicalUrl: { type: [string, 'null'], format: uri }
+        canonicalHost: { type: [string, 'null'] }
+        riskClass: { type: string, enum: [low, medium, high, forbidden] }
+        requiresIndependentApproval: { type: boolean }
+        reasonCodes:
+          type: array
+          items: { type: string }
+    WorkflowReceipt:
+      type: object
+      required: [status, version, auditEventId]
+      properties:
+        status: { type: string }
+        version: { type: integer }
+        auditEventId: { type: integer }
+    AnalyticsOverview:
+      type: object
+      required: [validClicks, suspectedBots, totalRequests, cohortSuppressionThreshold, dataGapCount, asOf, dailySeries]
+      properties:
+        validClicks: { type: integer, minimum: 0 }
+        suspectedBots: { type: integer, minimum: 0 }
+        totalRequests: { type: integer, minimum: 0 }
+        cohortSuppressionThreshold: { type: integer, const: 10 }
+        dataGapCount: { type: integer, minimum: 0 }
+        asOf: { type: string, format: date-time }
+        dailySeries:
+          type: array
+          items:
+            type: object
+            required: [dateUtc, validClicksDisplay, suspectedBotsDisplay, suppressed]
+            properties:
+              dateUtc: { type: string, format: date }
+              validClicksDisplay: { type: string }
+              suspectedBotsDisplay: { type: string }
+              suppressed: { type: boolean }
+    Campaign:
+      type: object
+      required: [id, unitId, code, name, status]
+      properties:
+        id: { type: string, format: uuid }
+        unitId: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [planned, running, ended] }
+    AuditEvent:
+      type: object
+      required: [id, action, subjectType, occurredAt, prevHash, rowHash]
+      properties:
+        id: { type: integer }
+        unitId: { type: [string, 'null'], format: uuid }
+        linkId: { type: [string, 'null'], format: uuid }
+        actorId: { type: [string, 'null'], format: uuid }
+        action: { type: string }
+        subjectType: { type: string }
+        subjectVersion: { type: [integer, 'null'] }
+        reason: { type: [string, 'null'] }
+        occurredAt: { type: string, format: date-time }
+        prevHash: { type: string }
+        rowHash: { type: string }
+    Unit:
+      type: object
+      required: [id, code, name, status, depth, version]
+      properties:
+        id: { type: string, format: uuid }
+        parentId: { type: [string, 'null'], format: uuid }
+        code: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [active, inactive] }
+        depth: { type: integer, minimum: 0 }
+        version: { type: integer, minimum: 1 }
+    UnitMembership:
+      type: object
+      required: [id, userId, unitId, status, validFrom]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        unitId: { type: string, format: uuid }
+        status: { type: string, enum: [active, revoked] }
+        validFrom: { type: string, format: date-time }
+        validUntil: { type: [string, 'null'], format: date-time }
+    ManagedUser:
+      type: object
+      required: [id, name, email, status, mfaEnrolled, isProtectedOwner, version]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        status: { type: string, enum: [invited, active, suspended, disabled] }
+        mfaEnrolled: { type: boolean }
+        isProtectedOwner: { type: boolean }
+        version: { type: integer, minimum: 1 }
+    ManagedRole:
+      type: object
+      required: [id, key, label, isProtected, sensitivity, status, version]
+      properties:
+        id: { type: string, format: uuid }
+        key: { type: string }
+        label: { type: string }
+        isProtected: { type: boolean }
+        sensitivity: { type: string, enum: [normal, sensitive, protected] }
+        status: { type: string, enum: [active, inactive] }
+        version: { type: integer, minimum: 1 }
+    RoleAssignment:
+      type: object
+      required: [id, userId, roleKey, scopeType, validFrom, status]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        roleKey: { type: string }
+        scopeType: { type: string, enum: [global, unit, unit_descendants, owned] }
+        unitId: { type: [string, 'null'], format: uuid }
+        validFrom: { type: string, format: date-time }
+        validUntil: { type: [string, 'null'], format: date-time }
+        status: { type: string, enum: [requested, active, expired, revoked, denied] }
+    AccessChangeRequest:
+      type: object
+      required: [id, requestedBy, targetUserId, roleKey, scopeType, status, reason]
+      properties:
+        id: { type: string, format: uuid }
+        requestedBy: { type: string, format: uuid }
+        targetUserId: { type: string, format: uuid }
+        roleKey: { type: string }
+        scopeType: { type: string, enum: [global, unit, unit_descendants, owned] }
+        unitId: { type: [string, 'null'], format: uuid }
+        status: { type: string, enum: [pending, approved, denied] }
+        reason: { type: string }
+    AbacPolicy:
+      type: object
+      required: [id, key, resource, action, activeVersion, status, checksum]
+      properties:
+        id: { type: string, format: uuid }
+        key: { type: string }
+        resource: { type: string }
+        action: { type: string }
+        activeVersion: { type: integer }
+        status: { type: string, enum: [draft, simulated, submitted, approved, active, superseded, rejected, revoked] }
+        checksum: { type: string }
+    CursorMeta:
+      type: object
+      required: [nextCursor, limit]
+      properties:
+        nextCursor: { type: [string, 'null'] }
+        limit: { type: integer }
+    ProblemDetails:
+      type: object
+      description: RFC 9457 Problem Details for HTTP APIs
+      required: [type, title, status, code, detail, requestId]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        requestId: { type: string, format: uuid }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, code, message]
+            properties:
+              field: { type: string }
+              code: { type: string }
+              message: { type: string }
+  responses:
+    Unauthorized:
+      description: Authentication required or session/token expired
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+          example:
+            type: "https://links.example.org/buka/problems/unauthorized"
+            title: "Autentikasi Diperlukan"
+            status: 401
+            code: "UNAUTHENTICATED"
+            detail: "Sesi atau kredensial API tidak valid atau telah berakhir."
+            requestId: "0192e5a0-9999-7000-8000-000000000401"
+    Forbidden:
+      description: Denied by RBAC, ABAC policy, delegation ceiling, or step-up MFA check
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+          example:
+            type: "https://links.example.org/buka/problems/forbidden"
+            title: "Akses Ditolak"
+            status: 403
+            code: "ACCESS_DENIED"
+            detail: "Peran atau kebijakan ABAC aktif tidak mengizinkan aksi ini."
+            requestId: "0192e5a0-9999-7000-8000-000000000403"
+    NotFound:
+      description: Resource not found or concealed by unit RLS boundary (no cross-unit existence leakage)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+          example:
+            type: "https://links.example.org/buka/problems/not-found"
+            title: "Sumber Daya Tidak Ditemukan"
+            status: 404
+            code: "RESOURCE_NOT_FOUND"
+            detail: "Data tidak ditemukan atau berada di luar cakupan unit Anda."
+            requestId: "0192e5a0-9999-7000-8000-000000000404"
+    Conflict:
+      description: Optimistic concurrency version mismatch (`If-Match`), duplicate/reserved slug, or invalid state transition
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+          example:
+            type: "https://links.example.org/buka/problems/conflict"
+            title: "Konflik Versi atau Status"
+            status: 409
+            code: "STALE_VERSION"
+            detail: "Versi sumber daya telah berubah. Muat ulang data terbaru sebelum menyimpan."
+            requestId: "0192e5a0-9999-7000-8000-000000000409"
+    Validation:
+      description: Input validation failure or forbidden destination URL policy verdict
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+          example:
+            type: "https://links.example.org/buka/problems/validation"
+            title: "Input Tidak Valid"
+            status: 422
+            code: "DESTINATION_POLICY_VIOLATION"
+            detail: "URL tujuan melanggar kebijakan keamanan (wajib HTTPS dan tanpa parameter sensitif)."
+            requestId: "0192e5a0-9999-7000-8000-000000000422"
+    PreconditionRequired:
+      description: Missing mandatory `If-Match` header on state-mutating request
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+          example:
+            type: "https://links.example.org/buka/problems/precondition-required"
+            title: "Header If-Match Diperlukan"
+            status: 428
+            code: "PRECONDITION_REQUIRED"
+            detail: "Sertakan header If-Match dengan ETag versi saat ini."
+            requestId: "0192e5a0-9999-7000-8000-000000000428"

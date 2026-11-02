@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, contract, test suites, artifact, backup/restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Ensure PyYAML (used by the OpenAPI/AsyncAPI contract check)
+        run: python3 -c 'import yaml' || sudo apt-get install -y --no-install-recommends python3-yaml
+
+      - name: Build the PHP 8.3 toolchain image
+        run: docker build -t awshortlink-php:local docker/php
+
+      - name: Dependency audit (composer.lock)
+        run: |
+          docker run --rm -v "$PWD:/app" -w /app -u "$(id -u):$(id -g)" awshortlink-php:local \
+            composer audit --locked --no-interaction
+
+      - name: Full gate (PostgreSQL 18, RLS, suites 01-08, artifact + SBOM, backup/restore, post-deploy)
+        run: bash scripts/ci.sh
+
+      - name: Upload release artifact and SBOM
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            build/awshortlink-release.tar.gz
+            build/sbom.cdx.json
+            build/SHA256SUMS
+          retention-days: 14

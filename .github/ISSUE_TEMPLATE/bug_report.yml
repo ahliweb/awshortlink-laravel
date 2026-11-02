@@ -1,0 +1,39 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve AW Shortlink. **Security issues must not be reported here** — use the private
+        advisory link on the issue chooser page.
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: "1.1.0 or commit SHA"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: PHP and PostgreSQL versions, hosting type (dedicated / shared), reverse proxy or CDN
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Remove secrets, tokens, IP addresses and personal data before pasting.
+      render: text
