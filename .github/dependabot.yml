@@ -16,3 +16,7 @@ updates:
     schedule:
       interval: weekly
     labels: [dependencies, docker]
+    ignore:
+      # The toolchain image is deliberately pinned to the MINIMUM supported PHP (8.3, see composer.json) so CI proves
+      # the floor. Moving the supported range is a maintainer decision made together with composer.json, not a bot bump.
+      - dependency-name: php
