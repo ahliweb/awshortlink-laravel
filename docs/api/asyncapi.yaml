@@ -1,0 +1,178 @@
+asyncapi: 3.0.0
+info:
+  title: AW Shortlink Domain & Security Events (Specification v1.1.0-draft)
+  version: 1.1.0-draft
+  description: >
+    Specification of internal domain and security events (Workflow Step 8 / SPEC-08).
+    Does not require a persistent queue daemon in P0: when panel cron/queue is
+    absent, events are dispatched synchronously inside the database transaction
+    to `Domain\Audit\AuditWriter` and `Domain\Qr\QrAssetStore`.
+    Every event defines its explicit producer (`x-producer`), consumers
+    (`x-consumers`), and `schemaVersion` per Gate 9 criteria.
+defaultContentType: application/json
+channels:
+  linkPublished:
+    address: shortlink.link.published.v1
+    messages:
+      linkPublished: { $ref: '#/components/messages/LinkPublished' }
+  linkSuspended:
+    address: shortlink.link.suspended.v1
+    messages:
+      linkSuspended: { $ref: '#/components/messages/LinkSuspended' }
+  clickAggregateUpdated:
+    address: shortlink.analytics.aggregate_updated.v1
+    messages:
+      clickAggregateUpdated: { $ref: '#/components/messages/AggregateUpdated' }
+  roleAssignmentChanged:
+    address: shortlink.iam.role_assignment_changed.v1
+    messages:
+      roleAssignmentChanged: { $ref: '#/components/messages/RoleAssignmentChanged' }
+  abacPolicyPublished:
+    address: shortlink.iam.abac_policy_published.v1
+    messages:
+      abacPolicyPublished: { $ref: '#/components/messages/AbacPolicyPublished' }
+  userAccountStatusChanged:
+    address: shortlink.iam.user_status_changed.v1
+    messages:
+      userAccountStatusChanged: { $ref: '#/components/messages/UserAccountStatusChanged' }
+operations:
+  publishLinkEvent:
+    action: send
+    x-event-id: EVT-001
+    x-producer: Domain\Links\Actions\PublishLink
+    x-consumers:
+      - Domain\Audit\AuditWriter
+      - Domain\Qr\QrAssetStore
+    channel: { $ref: '#/channels/linkPublished' }
+    messages: [{ $ref: '#/channels/linkPublished/messages/linkPublished' }]
+  suspendLinkEvent:
+    action: send
+    x-event-id: EVT-002
+    x-producer: Domain\Links\Actions\SuspendLink
+    x-consumers:
+      - Domain\Audit\AuditWriter
+      - Domain\Ops\SecurityAlertNotifier
+    channel: { $ref: '#/channels/linkSuspended' }
+    messages: [{ $ref: '#/channels/linkSuspended/messages/linkSuspended' }]
+  notifyAggregateUpdated:
+    action: send
+    x-event-id: EVT-003
+    x-producer: Domain\Analytics\RecordClick
+    x-consumers:
+      - Domain\Analytics\DailyStatsQuery
+    channel: { $ref: '#/channels/clickAggregateUpdated' }
+    messages: [{ $ref: '#/channels/clickAggregateUpdated/messages/clickAggregateUpdated' }]
+  publishRoleAssignmentChanged:
+    action: send
+    x-event-id: EVT-004
+    x-producer: Domain\AccessControl\Actions\AssignRole
+    x-consumers:
+      - Domain\Audit\AuditWriter
+      - Domain\Identity\Actions\RevokeSessions
+    channel: { $ref: '#/channels/roleAssignmentChanged' }
+    messages: [{ $ref: '#/channels/roleAssignmentChanged/messages/roleAssignmentChanged' }]
+  publishAbacPolicyActivated:
+    action: send
+    x-event-id: EVT-005
+    x-producer: Domain\AccessControl\Actions\PublishAbacPolicyVersion
+    x-consumers:
+      - Domain\Audit\AuditWriter
+      - Domain\AccessControl\Abac\PolicyEvaluator
+    channel: { $ref: '#/channels/abacPolicyPublished' }
+    messages: [{ $ref: '#/channels/abacPolicyPublished/messages/abacPolicyPublished' }]
+  publishUserStatusChanged:
+    action: send
+    x-event-id: EVT-006
+    x-producer: Domain\Identity\Actions\SuspendUser
+    x-consumers:
+      - Domain\Audit\AuditWriter
+      - Domain\Identity\Actions\RevokeSessions
+    channel: { $ref: '#/channels/userAccountStatusChanged' }
+    messages: [{ $ref: '#/channels/userAccountStatusChanged/messages/userAccountStatusChanged' }]
+components:
+  messages:
+    LinkPublished:
+      name: LinkPublished
+      x-event-id: EVT-001
+      payload:
+        type: object
+        required: [eventId, schemaVersion, linkId, unitId, version, occurredAt]
+        properties:
+          eventId: { type: string, format: uuid }
+          schemaVersion: { type: integer, const: 1 }
+          linkId: { type: string, format: uuid }
+          unitId: { type: string, format: uuid }
+          version: { type: integer, minimum: 1 }
+          occurredAt: { type: string, format: date-time }
+    LinkSuspended:
+      name: LinkSuspended
+      x-event-id: EVT-002
+      payload:
+        type: object
+        required: [eventId, schemaVersion, linkId, unitId, actorId, version, reasonCode, occurredAt]
+        properties:
+          eventId: { type: string, format: uuid }
+          schemaVersion: { type: integer, const: 1 }
+          linkId: { type: string, format: uuid }
+          unitId: { type: string, format: uuid }
+          actorId: { type: string, format: uuid }
+          version: { type: integer, minimum: 1 }
+          reasonCode: { type: string }
+          occurredAt: { type: string, format: date-time }
+    AggregateUpdated:
+      name: AggregateUpdated
+      x-event-id: EVT-003
+      payload:
+        type: object
+        required: [eventId, schemaVersion, linkId, dateUtc, botClass, occurredAt]
+        properties:
+          eventId: { type: string, format: uuid }
+          schemaVersion: { type: integer, const: 1 }
+          linkId: { type: string, format: uuid }
+          dateUtc: { type: string, format: date }
+          botClass: { type: integer, minimum: 0, maximum: 3 }
+          occurredAt: { type: string, format: date-time }
+    RoleAssignmentChanged:
+      name: RoleAssignmentChanged
+      x-event-id: EVT-004
+      payload:
+        type: object
+        required: [eventId, schemaVersion, assignmentId, targetUserId, actorId, roleKey, scopeType, changeType, occurredAt]
+        properties:
+          eventId: { type: string, format: uuid }
+          schemaVersion: { type: integer, const: 1 }
+          assignmentId: { type: string, format: uuid }
+          targetUserId: { type: string, format: uuid }
+          actorId: { type: string, format: uuid }
+          roleKey: { type: string }
+          scopeType: { type: string, enum: [global, unit, unit_descendants, owned] }
+          changeType: { type: string, enum: [assigned, revoked, expired] }
+          occurredAt: { type: string, format: date-time }
+    AbacPolicyPublished:
+      name: AbacPolicyPublished
+      x-event-id: EVT-005
+      payload:
+        type: object
+        required: [eventId, schemaVersion, policyKey, version, checksum, approvedBy, occurredAt]
+        properties:
+          eventId: { type: string, format: uuid }
+          schemaVersion: { type: integer, const: 1 }
+          policyKey: { type: string }
+          version: { type: integer, minimum: 1 }
+          checksum: { type: string }
+          approvedBy: { type: string, format: uuid }
+          occurredAt: { type: string, format: date-time }
+    UserAccountStatusChanged:
+      name: UserAccountStatusChanged
+      x-event-id: EVT-006
+      payload:
+        type: object
+        required: [eventId, schemaVersion, targetUserId, actorId, newStatus, sessionsRevoked, occurredAt]
+        properties:
+          eventId: { type: string, format: uuid }
+          schemaVersion: { type: integer, const: 1 }
+          targetUserId: { type: string, format: uuid }
+          actorId: { type: string, format: uuid }
+          newStatus: { type: string, enum: [active, suspended, disabled] }
+          sessionsRevoked: { type: boolean }
+          occurredAt: { type: string, format: date-time }

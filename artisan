@@ -1,0 +1,121 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/bootstrap/autoload.php';
+
+use App\Database\Migrator;
+use App\Domain\AccessControl\Database\RlsContext;
+use App\Domain\Audit\AuditChainVerifier;
+use App\Domain\Ops\OpsAndSecurityService;
+use App\Domain\Identity\IdentityService;
+use App\Support\PostgreSql;
+
+$command = $argv[1] ?? 'list';
+
+switch ($command) {
+    case 'migrate:rls':
+        Migrator::migrateAndSeed();
+        echo "[OK] PostgreSQL-only RLS schema & baseline catalog seeded.\n";
+        exit(0);
+
+    case 'rls:verify':
+        $posture = PostgreSql::introspectSecurityPosture();
+        echo json_encode($posture, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+        exit($posture['healthy'] ? 0 : 1);
+
+    case 'audit:verify':
+        $ctx = RlsContext::systemGlobal();
+        $result = $ctx->run(static fn (\PDO $db): array => AuditChainVerifier::verify($db));
+        echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+        exit($result['valid'] ? 0 : 1);
+
+    case 'schedule:run':
+        $hb = OpsAndSecurityService::runBoundedSchedule();
+        echo json_encode($hb, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+        exit(0);
+
+    case 'admin:bootstrap':
+        // Operator-only. Activates a protected account with a strong password + fresh TOTP secret.
+        //   php artisan admin:bootstrap <email> [--stdin] [--reset]
+        //   --stdin : read the password from the first stdin line (non-TTY, e.g. piped over SSH)
+        //   --reset : also allowed for already-active PROTECTED accounts (wipes old password/MFA/sessions first)
+        $email = strtolower(trim((string) ($argv[2] ?? '')));
+        $useStdin = in_array('--stdin', $argv, true);
+        $reset = in_array('--reset', $argv, true);
+        $interactive = function_exists('posix_isatty') && posix_isatty(STDIN);
+        if ($email === '' || (!$interactive && !$useStdin)) {
+            fwrite(STDERR, "Usage: php artisan admin:bootstrap <email> [--stdin] [--reset]\n");
+            exit(2);
+        }
+        $ctx = RlsContext::systemGlobal();
+        $userId = $ctx->run(static function (\PDO $db) use ($email, $reset): ?string {
+            $st = $db->prepare('SELECT id, status, is_protected_owner FROM shortlink.users WHERE email = :e');
+            $st->execute([':e' => $email]);
+            $row = $st->fetch();
+            if (!is_array($row)) {
+                // If email does not exist, check if we can adopt the seeded platform owner account
+                $ownerSt = $db->prepare("SELECT id, status, is_protected_owner FROM shortlink.users WHERE id = '00000000-0000-7000-8000-000000000001'");
+                $ownerSt->execute();
+                $ownerRow = $ownerSt->fetch();
+                if (is_array($ownerRow)) {
+                    $updEmail = $db->prepare("UPDATE shortlink.users SET email = :new_email, name = :new_name, updated_at = now() WHERE id = '00000000-0000-7000-8000-000000000001'");
+                    $updEmail->execute([
+                        ':new_email' => $email,
+                        ':new_name' => 'Pemilik Platform (' . $email . ')',
+                    ]);
+                    $row = $ownerRow;
+                } else {
+                    return null;
+                }
+            }
+            if ($row['status'] !== 'invited') {
+                if (!$reset || !filter_var($row['is_protected_owner'], FILTER_VALIDATE_BOOLEAN)) {
+                    return null;
+                }
+                $db->prepare("UPDATE shortlink.sessions SET revoked_at = now() WHERE user_id = :id AND revoked_at IS NULL")->execute([':id' => $row['id']]);
+                $db->prepare("UPDATE shortlink.users SET password_hash = NULL, mfa_secret_encrypted = NULL, mfa_enrolled_at = NULL, status = 'invited', version = version + 1, updated_at = now() WHERE id = :id")->execute([':id' => $row['id']]);
+            }
+            return (string) $row['id'];
+        });
+        if ($userId === null) {
+            fwrite(STDERR, "No eligible user (must be 'invited', or protected with --reset).\n");
+            exit(1);
+        }
+        if ($useStdin) {
+            $pw = rtrim((string) fgets(STDIN), "\r\n");
+            $pw2 = $pw;
+        } else {
+            system('stty -echo');
+            echo 'Password baru (min 12 karakter): ';
+            $pw = trim((string) fgets(STDIN));
+            echo "\nUlangi password: ";
+            $pw2 = trim((string) fgets(STDIN));
+            system('stty echo');
+            echo "\n";
+        }
+        if ($pw !== $pw2 || strlen($pw) < 12) {
+            fwrite(STDERR, "Password tidak cocok atau kurang dari 12 karakter.\n");
+            exit(1);
+        }
+        $res = IdentityService::acceptInvitation($userId, $pw);
+        $issuer = rawurlencode('AW Shortlink ' . \App\Support\Branding::orgShort());
+        echo "[OK] Akun {$email} aktif.\n";
+        echo "Daftarkan ke aplikasi authenticator (TOTP, SHA1, 6 digit, 30 dtk):\n";
+        echo "  Secret : {$res['mfa_secret']}\n";
+        echo "  URI    : otpauth://totp/{$issuer}:" . rawurlencode($email) . "?secret={$res['mfa_secret']}&issuer={$issuer}\n";
+        echo "Simpan secret secara aman; tidak ditampilkan lagi.\n";
+        exit(0);
+
+    default:
+        echo "AW Shortlink CLI (PostgreSQL-Only + Compulsory RLS)\n";
+        echo "Available commands:\n";
+        echo "  migrate:rls   Apply PostgreSQL DDL, RLS policies & seed catalog\n";
+        echo "  rls:verify    Verify PostgreSQL RLS & runtime role security posture\n";
+        echo "  audit:verify  Verify SHA-256 hash chain integrity of link_audit_events\n";
+        echo "  schedule:run  Run bounded scheduled housekeeping tasks\n";
+        echo "  admin:bootstrap <email>  Activate seeded protected account (password + TOTP)\n";
+        exit(0);
+}
+

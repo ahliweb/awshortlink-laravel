@@ -1,0 +1,19 @@
+# PostgreSQL 18 isolated test database for AW Shortlink (PostgreSQL-only contract per ADR-0005).
+# Never use SQLite, MySQL, or MariaDB in any environment.
+# Credentials come from the environment (scripts/lib/test-env.sh generates throw-away ones); there is no default.
+services:
+  postgres-test:
+    image: postgres:18.4
+    command: ['-c', 'fsync=off', '-c', 'synchronous_commit=off', '-c', 'full_page_writes=off', '-c', 'jit=off']
+    environment:
+      - POSTGRES_DB=awshortlink_test
+      - POSTGRES_USER=postgres
+      # Passed through from the caller's environment (scripts/lib/test-env.sh generates a random value); the
+      # container refuses to initialise without it.
+      - POSTGRES_PASSWORD
+    ports: ['127.0.0.1:${TEST_DB_PORT:-54328}:5432']
+    tmpfs: [/var/lib/postgresql]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U postgres -d awshortlink_test']
+      interval: 2s
+      retries: 30
