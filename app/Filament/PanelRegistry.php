@@ -235,11 +235,11 @@ BODY;
         // Group definitions for admin sidebar
         $sidebarGroups = [
             'Utama' => ['label' => 'UTAMA', 'icon' => '📊'],
-            'Tautan' => ['label' => 'MANAJEMEN TAUTAN', 'icon' => '🔗'],
-            'Analitik' => ['label' => 'ANALITIK & PELAPORAN', 'icon' => '📈'],
-            'Tata Kelola' => ['label' => 'TATA KELOLA & AUDIT', 'icon' => '📜'],
+            'Tautan' => ['label' => 'TAUTAN', 'icon' => '🔗'],
+            'Analitik' => ['label' => 'ANALITIK', 'icon' => '📈'],
+            'Tata Kelola' => ['label' => 'TATA KELOLA', 'icon' => '📜'],
             'IAM & Keamanan' => ['label' => 'IAM & KEAMANAN', 'icon' => '🔐'],
-            'Operasional' => ['label' => 'OPERASIONAL & SISTEM', 'icon' => '⚙️'],
+            'Operasional' => ['label' => 'SISTEM', 'icon' => '⚙️'],
         ];
 
         $screenIcons = [
@@ -257,6 +257,22 @@ BODY;
             'UI-017' => '⚙️',
         ];
 
+        // Short sidebar labels (full screen titles stay in page headings and the link tooltip).
+        $screenNavLabels = [
+            'UI-002' => 'Dasbor',
+            'UI-003' => 'Daftar Tautan',
+            'UI-004' => 'Buat Tautan',
+            'UI-006' => 'Persetujuan',
+            'UI-010' => 'Analitik Klik',
+            'UI-011' => 'Log Audit',
+            'UI-012' => 'Pengguna',
+            'UI-013' => 'Unit Organisasi',
+            'UI-014' => 'Peran & Izin',
+            'UI-015' => 'Kebijakan Akses',
+            'UI-016' => 'Inspektur Akses',
+            'UI-017' => 'Pengaturan',
+        ];
+
         $sidebarNavHtml = '';
         foreach ($sidebarGroups as $groupKey => $gMeta) {
             $groupItems = '';
@@ -267,21 +283,23 @@ BODY;
                 $isActive = ($sc['route'] === $screen['route']) ? ' active' : '';
                 $ico = $screenIcons[$sid] ?? '📄';
                 $groupItems .= sprintf(
-                    '<li><a href="%s" class="sidebar-link%s"><span class="sidebar-link-icon" aria-hidden="true">%s</span> <span class="sidebar-link-text">%s</span></a></li>',
+                    '<li><a href="%s" class="sidebar-link%s" title="%s"><span class="sidebar-link-icon" aria-hidden="true">%s</span> <span class="sidebar-link-text">%s</span></a></li>',
                     htmlspecialchars((string) $sc['route'], ENT_QUOTES, 'UTF-8'),
                     $isActive,
+                    htmlspecialchars((string) $sc['title'], ENT_QUOTES, 'UTF-8'),
                     $ico,
-                    htmlspecialchars((string) $sc['title'], ENT_QUOTES, 'UTF-8')
+                    htmlspecialchars((string) ($screenNavLabels[$sid] ?? $sc['title']), ENT_QUOTES, 'UTF-8')
                 );
             }
             if ($groupKey === 'Tautan') {
                 $isRepActive = ($screen['route'] === '/buka/admin/reports') ? ' active' : '';
                 $groupItems .= sprintf(
-                    '<li><a href="%s" class="sidebar-link%s"><span class="sidebar-link-icon" aria-hidden="true">%s</span> <span class="sidebar-link-text">%s</span></a></li>',
+                    '<li><a href="%s" class="sidebar-link%s" title="%s"><span class="sidebar-link-icon" aria-hidden="true">%s</span> <span class="sidebar-link-text">%s</span></a></li>',
                     '/buka/admin/reports',
                     $isRepActive,
+                    'Laporan Tautan Masuk &amp; Triase Insiden',
                     '⚠️',
-                    'Laporan Masuk & Triase'
+                    'Laporan Masuk'
                 );
             }
             if ($groupItems !== '') {
