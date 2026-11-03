@@ -1,5 +1,10 @@
 # Changelog — AW Shortlink
 
+## [Unreleased]
+
+### Changed
+- **Admin sidebar menu shortened** so labels are no longer truncated (ellipsis): group titles (`TAUTAN`, `ANALITIK`, `TATA KELOLA`, `IAM & KEAMANAN`, `SISTEM`) and items (`Dasbor`, `Daftar Tautan`, `Buat Tautan`, `Persetujuan`, `Laporan Masuk`, `Analitik Klik`, `Log Audit`, `Pengguna`, `Unit Organisasi`, `Peran & Izin`, `Kebijakan Akses`, `Inspektur Akses`, `Pengaturan`). Full screen titles remain in page headings, the dashboard menu cards and the sidebar link tooltip (`title`).
+
 ## [1.1.0] — Upstream import (generalised from the first production deployment)
 
 First public release. Functionality corresponds to the origin deployment's `v1.1.0`; everything specific to that
