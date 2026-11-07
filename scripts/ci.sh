@@ -17,7 +17,7 @@ if [[ ! -f vendor/autoload.php ]]; then
     composer install --no-interaction --no-progress --prefer-dist
 fi
 
-echo "==> [CI 2/7] Starting PostgreSQL 18.4 test service & applying role separation..."
+echo "==> [CI 2/7] Starting PostgreSQL 18.6 test service & applying role separation..."
 docker compose -f compose.test.yml up -d --wait
 apply_roles "${TEST_DB_NAME}"
 
