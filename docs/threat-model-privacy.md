@@ -65,7 +65,7 @@ Identity and access policy data require explicit minimization, ownership, retent
 
 ## Gate 9 Second-Pass Security & Privacy Re-Review (Workflow Step 3 → Step 9)
 
-Per `ahliweb/personal-coding` (`alur-pengembangan-produk.md` §3 Gate 9 checklist), this section records the **second-pass security and privacy review** conducted after UI screens (`UI-001..018`), PostgreSQL schema (`TBL-001..022`), and API contracts (`API-001..050`, `EVT-001..006`) were finalized:
+Per owner's internal cross-portfolio standard (the development-flow standard §3 Gate 9 checklist), this section records the **second-pass security and privacy review** conducted after UI screens (`UI-001..018`), PostgreSQL schema (`TBL-001..022`), and API contracts (`API-001..050`, `EVT-001..006`) were finalized:
 
 ### 1. DPIA Register (`DPIA-001..008` — UU No. 27 Tahun 2022 PDP)
 | DPIA ID | Assessment Question | Specification Baseline ([ADR-0007](adr/0007-resolved-design-decisions-des-001-015.md)) | Approval Owner |

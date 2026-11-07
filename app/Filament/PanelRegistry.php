@@ -12,7 +12,7 @@ use PDO;
  *
  * Maps all 18 canonical screens (`UI-001..018`) to their required `PERM-*` permissions and OpenAPI operations,
  * ensuring fail-closed server-side authorization (never merely hiding menu items).
- * Adheres to ahliweb/personal-coding UI/UX design tokens and WCAG 2.2 Level AA accessibility.
+ * Adheres to owner's internal cross-portfolio standard UI/UX design tokens and WCAG 2.2 Level AA accessibility.
  */
 final class PanelRegistry
 {
@@ -137,7 +137,7 @@ final class PanelRegistry
 
     /**
      * Renders WCAG 2.2 AA accessible Indonesian HTML for public and admin screens (#11, #20, #23).
-     * Follows ahliweb/personal-coding design tokens and GovTech UI guidelines.
+     * Follows owner's internal cross-portfolio standard design tokens and GovTech UI guidelines.
      *
      * Includes skip-to-main link (`#main-content`), `lang="id"`, landmarks (`header`, `nav`, `main`, `footer`),
      * explicit `<label for="...">`, `aria-live="polite"`, and high-contrast @@ORG_SHORT@@ styling.

@@ -1,6 +1,6 @@
 # Delivery Lifecycle, Definition of Ready (Gate 9) & Go/No-Go (Gate 15)
 
-**Authority:** `ahliweb/personal-coding`, `docs/alur-pengembangan-produk.md` version `v2.1.1` as reviewed 2026-11-01.
+**Authority:** owner's internal cross-portfolio standard, the development-flow standard version `v2.1.1` as reviewed 2026-11-01.
 **Gate 9 Status: APPROVED (GO) — 2026-11-01.**
 **Gate 15 Status: APPROVED (GO) — 2026-11-01 (`DEC-021`, `v1.0.0`).** All 43 issues (`#1`–`#43`) are completed, verified, and signed off.
 
@@ -11,7 +11,7 @@
 
 ## Gate 9 — Cross-Spec Review / Definition of Ready ([#9](https://github.com/ahliweb/awshortlink-laravel/issues/9))
 
-### A. Technical Specification & Cross-Spec Consistency Checks (`alur-pengembangan-produk.md` §3) — **VERIFIED PASS (2026-11-01)**
+### A. Technical Specification & Cross-Spec Consistency Checks (the development-flow standard §3) — **VERIFIED PASS (2026-11-01)**
 - [x] **Bidirectional Traceability (`REQ-*` → `UI-*` → `TBL-*` → `PERM-*`/`RLS-*` → `ALG-*` → `API-*`/`EVT-*` → `ISS-*` → `TST-*`):** All 25 requirements (`REQ-001..025`) traced in [traceability.md](traceability.md) with zero orphan items.
 - [x] **No Screen Without Contract Data Source (`layar_tanpa_sumber_data_kontrak`):** All 18 screens (`UI-001..018`) mapped to `API-001..058` or `x-non-api-routes` in [openapi.yaml](api/openapi.yaml) and [ui-ux-design-system.md](../design/ui-ux-design-system.md).
 - [x] **No Endpoint Without Permission (`endpoint_tanpa_permission`):** All 58 OpenAPI operations (`API-001..058`) declare explicit `x-permission` bindings matching `PERM-001..062` in [access-control.md](access-control.md).

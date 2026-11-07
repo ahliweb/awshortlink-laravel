@@ -54,7 +54,7 @@ See [ADR index](adr/README.md); all ADRs currently proposed and not approved.
 - Filament: https://filamentphp.com/docs/5.x
 - OWASP ASVS: https://owasp.org/www-project-application-security-verification-standard/
 - WCAG 2.2: https://www.w3.org/TR/WCAG22/
-- Personal-coding process: https://github.com/ahliweb/personal-coding/blob/main/docs/alur-pengembangan-produk.md
+- Internal cross-portfolio standard process: owner's internal development-flow standard
 
 ## Changelog
 
