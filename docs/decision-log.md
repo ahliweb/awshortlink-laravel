@@ -14,7 +14,7 @@ This document records **proposed decisions**, **not approvals**. Changes to bind
 | DEC-008 | No raw visitor profiling / no health PII, proposed | Default analytics counts only; DPIA approval pending |
 | DEC-009 | 302 default for editable links; no permanent cache, proposed | Destination can change and must revoke promptly |
 | DEC-010 | Parent MIT LICENSE retained, confirmed from repo | Third-party library licenses and institutional deployment approvals separate |
-| DEC-011 | Human Gate 9 and 15 approvals mandatory | Per ahliweb/personal-coding workflow v2.1.1 |
+| DEC-011 | Human Gate 9 and 15 approvals mandatory | Per owner's internal cross-portfolio standard workflow v2.1.1 |
 | DEC-012 | Cron optional for P1; critical policies checked at request | Zero-SSH setup cannot presume scheduler availability |
 
 ## Known open actions
@@ -38,4 +38,4 @@ Laravel deploy: https://laravel.com/docs/13.x/deployment
 | DEC-019 | **Gate 9 (`#9`) Human Approval (GO)** signed by repository owner (project owner) on 2026-11-01 | Unlocks Phase II implementation issues (`#10`–`#43`); production deployment remains gated at Gate 15 (`#25`) |
 | DEC-020 | Phase II vertical slices (`#10`–`#24`, `#27`–`#43`) implemented and verified (`v1.0.0-rc.1`) against PostgreSQL 18.4 with compulsory RLS (`105` policies across `28` tables), `235` passing assertions (`TST-001..019`), CycloneDX 1.5 SBOM, and `awshortlink_backup` `pg_dump`/`pg_restore` rehearsal | Merged via PR `#49` (2026-11-01) |
 | DEC-021 | **Gate 15 (`#25`) Human Approval (GO) & Release `v1.0.0` (`#26`)** signed by repository owner (project owner) on 2026-11-01 | Closes `#25` and `#26` with automated post-deploy synthetic verification (`scripts/post-deploy-verify.sh`) |
-| DEC-022 | **Semantic Versioning 2.0.0 Minor Release `v1.1.0` (2026-11-03)** | Implements backward-compatible feature additions: public search & abuse report workflow (`/buka/laporan`), admin abuse triage management (`/buka/admin/reports`), public vs unlisted link visibility toggle, detailed visitor telemetry analytics (`/buka/admin/links/{id}/analytics`), SVG traffic trend charts, universal table search/paging, and complete @@ORG_SHORT@@ organization units. Adheres to `ahliweb/personal-coding` standard (`DL-035`). |
+| DEC-022 | **Semantic Versioning 2.0.0 Minor Release `v1.1.0` (2026-11-03)** | Implements backward-compatible feature additions: public search & abuse report workflow (`/buka/laporan`), admin abuse triage management (`/buka/admin/reports`), public vs unlisted link visibility toggle, detailed visitor telemetry analytics (`/buka/admin/links/{id}/analytics`), SVG traffic trend charts, universal table search/paging, and complete @@ORG_SHORT@@ organization units. Adheres to owner's internal cross-portfolio standard (`DL-035`). |

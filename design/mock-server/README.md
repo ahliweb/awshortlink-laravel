@@ -2,7 +2,7 @@
 
 **Status:** Specification & contract verification tooling (not production code).
 
-Per `ahliweb/personal-coding` (`docs/alur-pengembangan-produk.md` v2.1.1 Step 8 & Gate 9), the mock server is **generated directly from `docs/api/openapi.yaml`** at runtime rather than hand-coded, and serves the exact response schemas, headers (`ETag`), error taxonomy (`application/problem+json`), and `x-permission` bindings defined in the contract.
+Per owner's internal cross-portfolio standard (the development-flow standard v2.1.1 Step 8 & Gate 9), the mock server is **generated directly from `docs/api/openapi.yaml`** at runtime rather than hand-coded, and serves the exact response schemas, headers (`ETag`), error taxonomy (`application/problem+json`), and `x-permission` bindings defined in the contract.
 
 ## Files
 - [`server.mjs`](server.mjs) — Zero-dependency Node.js HTTP mock server that loads [`../../docs/api/openapi.yaml`](../../docs/api/openapi.yaml) dynamically and serves `/buka/api/v1/*` (`API-001`..`API-058`, 58 operations).

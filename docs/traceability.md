@@ -1,6 +1,6 @@
 # Cross-Specification Traceability Matrix — v1.1.0-draft (Workflow 9 / SPEC-09)
 
-**Authority:** `ahliweb/personal-coding` (`docs/alur-pengembangan-produk.md` v2.1.1 §3 Gate 9).
+**Authority:** owner's internal cross-portfolio standard (the development-flow standard v2.1.1 §3 Gate 9).
 Every product requirement (`REQ-001..025`) traces forward and backward to UI screens (`UI-001..018`), PostgreSQL tables (`TBL-001..022`) & PII fields (`PII-001..007`), authorization permissions (`PERM-001..062`) & RLS policies (`RLS-001..022`), domain algorithms (`ALG-001..005`), API contracts (`API-001..058`) & events (`EVT-001..006`), GitHub issues (`#1..#43`), and acceptance tests (`TST-001..019`).
 
 ## 1. Requirements → UI / Data / Policy / Algorithm / Contract / Issue / Test (`REQ-001..025`)
